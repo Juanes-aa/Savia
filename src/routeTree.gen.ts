@@ -9,38 +9,152 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as BotRouteImport } from './routes/bot'
+import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppReportesRouteImport } from './routes/app.reportes'
+import { Route as AppNinosRouteImport } from './routes/app.ninos'
+import { Route as AppInstitucionesRouteImport } from './routes/app.instituciones'
+import { Route as AppFamiliasRouteImport } from './routes/app.familias'
+import { Route as AppDespachosRouteImport } from './routes/app.despachos'
 
+const BotRoute = BotRouteImport.update({
+  id: '/bot',
+  path: '/bot',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportesRoute = AppReportesRouteImport.update({
+  id: '/reportes',
+  path: '/reportes',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppNinosRoute = AppNinosRouteImport.update({
+  id: '/ninos',
+  path: '/ninos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInstitucionesRoute = AppInstitucionesRouteImport.update({
+  id: '/instituciones',
+  path: '/instituciones',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFamiliasRoute = AppFamiliasRouteImport.update({
+  id: '/familias',
+  path: '/familias',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDespachosRoute = AppDespachosRouteImport.update({
+  id: '/despachos',
+  path: '/despachos',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRouteWithChildren
+  '/bot': typeof BotRoute
+  '/app/despachos': typeof AppDespachosRoute
+  '/app/familias': typeof AppFamiliasRoute
+  '/app/instituciones': typeof AppInstitucionesRoute
+  '/app/ninos': typeof AppNinosRoute
+  '/app/reportes': typeof AppReportesRoute
+  '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bot': typeof BotRoute
+  '/app/despachos': typeof AppDespachosRoute
+  '/app/familias': typeof AppFamiliasRoute
+  '/app/instituciones': typeof AppInstitucionesRoute
+  '/app/ninos': typeof AppNinosRoute
+  '/app/reportes': typeof AppReportesRoute
+  '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRouteWithChildren
+  '/bot': typeof BotRoute
+  '/app/despachos': typeof AppDespachosRoute
+  '/app/familias': typeof AppFamiliasRoute
+  '/app/instituciones': typeof AppInstitucionesRoute
+  '/app/ninos': typeof AppNinosRoute
+  '/app/reportes': typeof AppReportesRoute
+  '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/app'
+    | '/bot'
+    | '/app/despachos'
+    | '/app/familias'
+    | '/app/instituciones'
+    | '/app/ninos'
+    | '/app/reportes'
+    | '/app/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/bot'
+    | '/app/despachos'
+    | '/app/familias'
+    | '/app/instituciones'
+    | '/app/ninos'
+    | '/app/reportes'
+    | '/app'
+  id:
+    | '__root__'
+    | '/'
+    | '/app'
+    | '/bot'
+    | '/app/despachos'
+    | '/app/familias'
+    | '/app/instituciones'
+    | '/app/ninos'
+    | '/app/reportes'
+    | '/app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  BotRoute: typeof BotRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/bot': {
+      id: '/bot'
+      path: '/bot'
+      fullPath: '/bot'
+      preLoaderRoute: typeof BotRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,22 +162,76 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/': {
+      id: '/app/'
+      path: '/'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/reportes': {
+      id: '/app/reportes'
+      path: '/reportes'
+      fullPath: '/app/reportes'
+      preLoaderRoute: typeof AppReportesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/ninos': {
+      id: '/app/ninos'
+      path: '/ninos'
+      fullPath: '/app/ninos'
+      preLoaderRoute: typeof AppNinosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/instituciones': {
+      id: '/app/instituciones'
+      path: '/instituciones'
+      fullPath: '/app/instituciones'
+      preLoaderRoute: typeof AppInstitucionesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/familias': {
+      id: '/app/familias'
+      path: '/familias'
+      fullPath: '/app/familias'
+      preLoaderRoute: typeof AppFamiliasRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/despachos': {
+      id: '/app/despachos'
+      path: '/despachos'
+      fullPath: '/app/despachos'
+      preLoaderRoute: typeof AppDespachosRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppDespachosRoute: typeof AppDespachosRoute
+  AppFamiliasRoute: typeof AppFamiliasRoute
+  AppInstitucionesRoute: typeof AppInstitucionesRoute
+  AppNinosRoute: typeof AppNinosRoute
+  AppReportesRoute: typeof AppReportesRoute
+  AppIndexRoute: typeof AppIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppDespachosRoute: AppDespachosRoute,
+  AppFamiliasRoute: AppFamiliasRoute,
+  AppInstitucionesRoute: AppInstitucionesRoute,
+  AppNinosRoute: AppNinosRoute,
+  AppReportesRoute: AppReportesRoute,
+  AppIndexRoute: AppIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  BotRoute: BotRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
