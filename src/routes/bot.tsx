@@ -360,7 +360,7 @@ function Bubble({ m, onQuick, thinking }: { m: Msg; onQuick: (t: string) => void
   const isBot = m.from === "bot";
   return (
     <article
-      className={`flex items-end gap-1.5 ${isBot ? "" : "justify-end"} animate-in fade-in slide-in-from-bottom-1 duration-200`}
+      className={`flex items-end gap-1.5 ${isBot ? "" : "justify-end"}`}
       aria-label={`${isBot ? "Savia bot" : "Tú"}: ${m.text}`}
     >
       {isBot && (
