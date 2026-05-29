@@ -35,13 +35,14 @@ function nowTs() {
 }
 
 function formatText(text: string) {
-  return text.split("\n").map((line, i) => {
+  const lines = text.split("\n");
+  return lines.map((line, i) => {
     const parts = line.split(/(\*[^*]+\*)/g).map((part, j) =>
       part.startsWith("*") && part.endsWith("*")
         ? <strong key={j}>{part.slice(1, -1)}</strong>
         : part
     );
-    return <span key={i}>{parts}{i < text.split("\n").length - 1 && <br />}</span>;
+    return <span key={i}>{parts}{i < lines.length - 1 && <br />}</span>;
   });
 }
 
@@ -54,7 +55,8 @@ function BotPage() {
   const announcerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 999999, behavior: "smooth" });
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [msgs, thinking]);
 
   function announce(text: string) {
