@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 
 export const Route = createFileRoute("/bot")({
   head: () => ({ meta: [{ title: "Savia · Bot institución" }] }),
@@ -10,16 +10,15 @@ export const Route = createFileRoute("/bot")({
 
 type Status = "sending" | "sent" | "read";
 type Msg = {
-  id: number;
+  id: string;
   from: "bot" | "user";
   text: string;
   ts: string;
   status?: Status;
   quick?: string[];
-  isLast?: boolean; // only last bot msg shows quick replies
+  isLast?: boolean;
 };
 
-// Conversation state machine
 type State =
   | "menu"
   | "confirmar_asociar"
@@ -32,9 +31,6 @@ type State =
   | "peso_input";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-let _id = 0;
-const uid = () => ++_id;
 
 function nowTs() {
   const d = new Date();
@@ -53,139 +49,142 @@ function formatText(text: string) {
   });
 }
 
-function botMsg(text: string, quick?: string[]): Msg {
-  return { id: uid(), from: "bot", ts: nowTs(), text, quick };
+function toName(s: string) {
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// ─── State machine ────────────────────────────────────────────────────────────
+// ─── Pure state machine (no shared object references) ─────────────────────────
 
-const MENU_MSG = botMsg(
-  "¿En qué puedo ayudarte? 😊",
-  ["Confirmar recepción", "Registrar familia", "Ver historial", "Registrar peso/talla"]
-);
+type BotReply = { text: string; quick?: string[] };
 
-function nextState(state: State, input: string): { next: State; reply: Msg } {
+const MENU_REPLY: BotReply = {
+  text: "¿En qué puedo ayudarte? 😊",
+  quick: ["Confirmar recepción", "Registrar familia", "Ver historial", "Registrar peso/talla"],
+};
+
+function nextState(state: State, input: string): { next: State; reply: BotReply } {
   const t = input.trim();
 
-  // ── MENU ──────────────────────────────────────────────────────────────────
   if (state === "menu") {
     if (/confirmar/i.test(t)) {
       return {
         next: "confirmar_asociar",
-        reply: botMsg(
-          "✅ *Recepción confirmada* del lote D-2240.\n\nRegistré 35 mercados nutricionales · 420 kg.\n\n¿Deseas asociarlo a las familias que recibieron hoy?",
-          ["Sí, registrar familias", "No por ahora"]
-        ),
+        reply: {
+          text: "✅ *Recepción confirmada* del lote D-2240.\n\nRegistré 35 mercados nutricionales · 420 kg.\n\n¿Deseas asociarlo a las familias que recibieron hoy?",
+          quick: ["Sí, registrar familias", "No por ahora"],
+        },
       };
     }
     if (/registrar familia|nueva familia/i.test(t)) {
       return {
         next: "famil_nombre",
-        reply: botMsg(
-          "📋 Registremos una familia nueva.\n\n¿Cuál es el nombre del jefe o jefa de hogar?",
-          ["María Restrepo", "Carlos Ospina", "Otro nombre"]
-        ),
+        reply: {
+          text: "📋 Registremos una familia nueva.\n\n¿Cuál es el nombre del jefe o jefa de hogar?",
+          quick: ["María Restrepo", "Carlos Ospina", "Otro nombre"],
+        },
       };
     }
     if (/historial/i.test(t)) {
       return {
         next: "historial_detalle",
-        reply: botMsg(
-          "🗂 *Últimos 30 días — Parroquia San Judas:*\n\n• 4 despachos recibidos\n• 1.180 kg en alimentos\n• 35 familias atendidas\n• 12 niños monitoreados\n\n¿Quieres ver el detalle de algún despacho?",
-          ["D-2240", "D-2231", "D-2218", "Volver al menú"]
-        ),
+        reply: {
+          text: "🗂 *Últimos 30 días — Parroquia San Judas:*\n\n• 4 despachos recibidos\n• 1.180 kg en alimentos\n• 35 familias atendidas\n• 12 niños monitoreados\n\n¿Quieres ver el detalle de algún despacho?",
+          quick: ["D-2240", "D-2231", "D-2218", "Volver al menú"],
+        },
       };
     }
     if (/peso|talla|medici/i.test(t)) {
       return {
         next: "peso_input",
-        reply: botMsg(
-          "📐 *Registrar medición nutricional*\n\nEnvía el *peso en kg* y la *talla en cm*, separados por coma.\n\n_Ejemplo: 9.6, 75_"
-        ),
+        reply: {
+          text: "📐 *Registrar medición nutricional*\n\nEnvía el *peso en kg* y la *talla en cm*, separados por coma.\n\n_Ejemplo: 9.6, 75_",
+        },
       };
     }
-    return { next: "menu", reply: MENU_MSG };
+    return { next: "menu", reply: MENU_REPLY };
   }
 
-  // ── CONFIRMAR → ASOCIAR ───────────────────────────────────────────────────
   if (state === "confirmar_asociar") {
     if (/sí|si|registrar famil/i.test(t)) {
       return {
         next: "famil_nombre",
-        reply: botMsg(
-          "📋 Registremos la familia.\n\n¿Cuál es el nombre del jefe o jefa de hogar?",
-          ["María Restrepo", "Carlos Ospina", "Otro nombre"]
-        ),
-      };
-    }
-    return { next: "menu", reply: botMsg("Entendido 👍\n\nEl despacho quedó registrado en el panel.", ["¿Qué más necesitas?"].concat(["Registrar familia", "Ver historial"])) };
-  }
-
-  // ── FAMILIA → NOMBRE ──────────────────────────────────────────────────────
-  if (state === "famil_nombre") {
-    const name = t === "otro nombre" ? "" : t;
-    return {
-      next: "famil_integrantes",
-      reply: botMsg(
-        name
-          ? `Familia *${toName(t)}* anotada.\n\n¿Cuántos integrantes tiene el hogar?`
-          : "¿Cuál es el nombre del jefe o jefa de hogar? Escríbelo directamente.",
-        name ? ["2", "3", "4", "5", "6 o más"] : undefined
-      ),
-    };
-  }
-
-  // ── FAMILIA → INTEGRANTES ─────────────────────────────────────────────────
-  if (state === "famil_integrantes") {
-    return {
-      next: "famil_ninos",
-      reply: botMsg(
-        `Anotado: *${t} integrante${t === "1" ? "" : "s"}*.\n\n¿Hay niños menores de 5 años en el hogar?`,
-        ["Sí, 1 niño", "Sí, 2 niños", "No hay niños"]
-      ),
-    };
-  }
-
-  // ── FAMILIA → NIÑOS ───────────────────────────────────────────────────────
-  if (state === "famil_ninos") {
-    if (/no/i.test(t)) {
-      return {
-        next: "menu",
-        reply: botMsg(
-          "✅ Familia registrada correctamente.\n\nLos datos ya están en el panel del banco.",
-          ["Registrar otra familia", "Ver historial", "Menú principal"]
-        ),
-      };
-    }
-    return {
-      next: "famil_medicion_prompt",
-      reply: botMsg(
-        "¿Quieres registrar el peso y talla del niño ahora?\n_(Puedes hacerlo después también)_",
-        ["Sí, registrar ahora", "Más tarde"]
-      ),
-    };
-  }
-
-  // ── FAMILIA → PROMPT MEDICIÓN ─────────────────────────────────────────────
-  if (state === "famil_medicion_prompt") {
-    if (/sí|si|ahora|registrar/i.test(t)) {
-      return {
-        next: "famil_medicion_input",
-        reply: botMsg(
-          "📐 Envía el *peso en kg* y la *talla en cm*, separados por coma.\n\n_Ejemplo: 9.6, 75_"
-        ),
+        reply: {
+          text: "📋 Registremos la familia.\n\n¿Cuál es el nombre del jefe o jefa de hogar?",
+          quick: ["María Restrepo", "Carlos Ospina", "Otro nombre"],
+        },
       };
     }
     return {
       next: "menu",
-      reply: botMsg(
-        "✅ Familia registrada. Puedes registrar las medidas después desde el panel.",
-        ["Registrar otra familia", "Menú principal"]
-      ),
+      reply: {
+        text: "Entendido 👍\n\nEl despacho quedó registrado en el panel.",
+        quick: ["Registrar familia", "Ver historial", "Registrar peso/talla"],
+      },
     };
   }
 
-  // ── FAMILIA → INGRESO MEDICIÓN ────────────────────────────────────────────
+  if (state === "famil_nombre") {
+    const isPlaceholder = /^otro nombre$/i.test(t);
+    if (isPlaceholder) {
+      return {
+        next: "famil_nombre",
+        reply: { text: "¿Cuál es el nombre del jefe o jefa de hogar? Escríbelo directamente." },
+      };
+    }
+    return {
+      next: "famil_integrantes",
+      reply: {
+        text: `Familia *${toName(t)}* anotada.\n\n¿Cuántos integrantes tiene el hogar?`,
+        quick: ["2", "3", "4", "5", "6 o más"],
+      },
+    };
+  }
+
+  if (state === "famil_integrantes") {
+    return {
+      next: "famil_ninos",
+      reply: {
+        text: `Anotado: *${t} integrante${t === "1" ? "" : "s"}*.\n\n¿Hay niños menores de 5 años en el hogar?`,
+        quick: ["Sí, 1 niño", "Sí, 2 niños", "No hay niños"],
+      },
+    };
+  }
+
+  if (state === "famil_ninos") {
+    if (/no/i.test(t)) {
+      return {
+        next: "menu",
+        reply: {
+          text: "✅ Familia registrada correctamente.\n\nLos datos ya están en el panel del banco.",
+          quick: ["Registrar otra familia", "Ver historial", "Menú principal"],
+        },
+      };
+    }
+    return {
+      next: "famil_medicion_prompt",
+      reply: {
+        text: "¿Quieres registrar el peso y talla del niño ahora?\n_(Puedes hacerlo después también)_",
+        quick: ["Sí, registrar ahora", "Más tarde"],
+      },
+    };
+  }
+
+  if (state === "famil_medicion_prompt") {
+    if (/sí|si|ahora|registrar/i.test(t)) {
+      return {
+        next: "famil_medicion_input",
+        reply: { text: "📐 Envía el *peso en kg* y la *talla en cm*, separados por coma.\n\n_Ejemplo: 9.6, 75_" },
+      };
+    }
+    return {
+      next: "menu",
+      reply: {
+        text: "✅ Familia registrada. Puedes registrar las medidas después desde el panel.",
+        quick: ["Registrar otra familia", "Menú principal"],
+      },
+    };
+  }
+
   if (state === "famil_medicion_input") {
     const match = t.match(/^(\d+[.,]\d+|\d+)\s*[,;]\s*(\d+[.,]?\d*)$/);
     if (match) {
@@ -193,24 +192,21 @@ function nextState(state: State, input: string): { next: State; reply: Msg } {
       const talla = match[2].replace(",", ".");
       return {
         next: "menu",
-        reply: botMsg(
-          `✅ *Medición registrada:*\n• Peso: *${peso} kg*\n• Talla: *${talla} cm*\n\nEl z-score fue calculado automáticamente. Todo en el panel del banco.`,
-          ["Registrar otra medición", "Registrar otra familia", "Menú principal"]
-        ),
+        reply: {
+          text: `✅ *Medición registrada:*\n• Peso: *${peso} kg*\n• Talla: *${talla} cm*\n\nEl z-score fue calculado automáticamente. Todo en el panel del banco.`,
+          quick: ["Registrar otra medición", "Registrar otra familia", "Menú principal"],
+        },
       };
     }
     return {
       next: "famil_medicion_input",
-      reply: botMsg(
-        "No entendí el formato. Por favor escribe el peso y talla separados por coma.\n\n_Ejemplo: 9.6, 75_"
-      ),
+      reply: { text: "No entendí el formato. Por favor escribe el peso y talla separados por coma.\n\n_Ejemplo: 9.6, 75_" },
     };
   }
 
-  // ── HISTORIAL → DETALLE ───────────────────────────────────────────────────
   if (state === "historial_detalle") {
     if (/volver|menú|menu/i.test(t)) {
-      return { next: "menu", reply: MENU_MSG };
+      return { next: "menu", reply: MENU_REPLY };
     }
     const lote = t.toUpperCase().match(/D-\d+/)?.[0] ?? t.toUpperCase();
     const datos: Record<string, string> = {
@@ -220,14 +216,13 @@ function nextState(state: State, input: string): { next: State; reply: Msg } {
     };
     return {
       next: "historial_detalle",
-      reply: botMsg(
-        `📦 *${lote}:*\n${datos[lote] ?? "Despacho no encontrado."}\n\nReporte completo disponible en el panel del banco.`,
-        ["D-2240", "D-2231", "D-2218", "Volver al menú"]
-      ),
+      reply: {
+        text: `📦 *${lote}:*\n${datos[lote] ?? "Despacho no encontrado."}\n\nReporte completo disponible en el panel del banco.`,
+        quick: ["D-2240", "D-2231", "D-2218", "Volver al menú"],
+      },
     };
   }
 
-  // ── PESO / TALLA DIRECTO ──────────────────────────────────────────────────
   if (state === "peso_input") {
     const match = t.match(/^(\d+[.,]\d+|\d+)\s*[,;]\s*(\d+[.,]?\d*)$/);
     if (match) {
@@ -235,110 +230,236 @@ function nextState(state: State, input: string): { next: State; reply: Msg } {
       const talla = match[2].replace(",", ".");
       return {
         next: "menu",
-        reply: botMsg(
-          `✅ *Medición registrada:*\n• Peso: *${peso} kg*\n• Talla: *${talla} cm*\n\nZ-score calculado automáticamente y guardado en el panel.`,
-          ["Registrar otra medición", "Registrar familia", "Menú principal"]
-        ),
+        reply: {
+          text: `✅ *Medición registrada:*\n• Peso: *${peso} kg*\n• Talla: *${talla} cm*\n\nZ-score calculado automáticamente y guardado en el panel.`,
+          quick: ["Registrar otra medición", "Registrar familia", "Menú principal"],
+        },
       };
     }
     return {
       next: "peso_input",
-      reply: botMsg(
-        "Por favor escribe el peso y talla separados por coma.\n\n_Ejemplo: 9.6, 75_"
-      ),
+      reply: { text: "Por favor escribe el peso y talla separados por coma.\n\n_Ejemplo: 9.6, 75_" },
     };
   }
 
-  return { next: "menu", reply: MENU_MSG };
+  return { next: "menu", reply: MENU_REPLY };
 }
 
-function toName(s: string) {
-  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+// ─── Reducer (single atomic update per event) ────────────────────────────────
+
+type ChatState = {
+  msgs: Msg[];
+  convState: State;
+  input: string;
+  thinking: boolean;
+};
+
+type Action =
+  | { type: "INPUT"; value: string }
+  | { type: "SEND_START"; userMsg: Msg }
+  | { type: "MARK_SENT"; id: string }
+  | { type: "REPLY"; userId: string; reply: Msg; next: State }
+  | { type: "RESET"; initial: Msg[] };
+
+function reducer(s: ChatState, a: Action): ChatState {
+  switch (a.type) {
+    case "INPUT":
+      return s.input === a.value ? s : { ...s, input: a.value };
+
+    case "SEND_START": {
+      const cleared = s.msgs.map((m) => (m.isLast ? { ...m, isLast: false } : m));
+      return {
+        ...s,
+        msgs: [...cleared, a.userMsg],
+        input: "",
+        thinking: true,
+      };
+    }
+
+    case "MARK_SENT": {
+      let changed = false;
+      const msgs = s.msgs.map((m) => {
+        if (m.id === a.id && m.status !== "sent") {
+          changed = true;
+          return { ...m, status: "sent" as Status };
+        }
+        return m;
+      });
+      return changed ? { ...s, msgs } : s;
+    }
+
+    case "REPLY": {
+      const msgs = s.msgs.map((m) =>
+        m.id === a.userId ? { ...m, status: "read" as Status } : m
+      );
+      return {
+        ...s,
+        msgs: [...msgs, a.reply],
+        convState: a.next,
+        thinking: false,
+      };
+    }
+
+    case "RESET":
+      return { msgs: a.initial, convState: "menu", input: "", thinking: false };
+
+    default:
+      return s;
+  }
 }
 
-// ─── Initial state ────────────────────────────────────────────────────────────
+// ─── Stable id generator (per-mount, no module-level mutation) ────────────────
 
-const initialMsgs: Msg[] = [
-  {
-    id: uid(),
-    from: "bot",
-    ts: "10:42",
-    text: "Hola Parroquia San Judas 👋\n\nTienes un despacho en camino:\n📦 *Lote D-2240* · 35 mercados nutricionales · 420 kg\nLlegada estimada: hoy 3:00 pm",
-    quick: ["Confirmar recepción", "Registrar familia", "Ver historial", "Registrar peso/talla"],
-  },
-];
+function useIdGen() {
+  const ref = useRef(0);
+  return useCallback(() => {
+    ref.current += 1;
+    return `m_${ref.current}_${Math.random().toString(36).slice(2, 7)}`;
+  }, []);
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 function BotPage() {
-  const [msgs, setMsgs] = useState<Msg[]>(initialMsgs);
-  const [convState, setConvState] = useState<State>("menu");
-  const [input, setInput] = useState("");
-  const [thinking, setThinking] = useState(false);
+  const newId = useIdGen();
+
+  const buildInitial = useCallback((): Msg[] => [
+    {
+      id: newId(),
+      from: "bot",
+      ts: "10:42",
+      text: "Hola Parroquia San Judas 👋\n\nTienes un despacho en camino:\n📦 *Lote D-2240* · 35 mercados nutricionales · 420 kg\nLlegada estimada: hoy 3:00 pm",
+      quick: ["Confirmar recepción", "Registrar familia", "Ver historial", "Registrar peso/talla"],
+      isLast: true,
+    },
+  ], [newId]);
+
+  const [state, dispatch] = useReducer(reducer, undefined as unknown as ChatState, () => ({
+    msgs: buildInitial(),
+    convState: "menu" as State,
+    input: "",
+    thinking: false,
+  }));
+
+  const { msgs, convState, input, thinking } = state;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const announcerRef = useRef<HTMLDivElement>(null);
-  // Synchronous guard to prevent race conditions with React's async state
-  const thinkingRef = useRef(false);
+  const busyRef = useRef(false);
   const t1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const t2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const t3Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimers = useCallback(() => {
+    if (t1Ref.current) { clearTimeout(t1Ref.current); t1Ref.current = null; }
+    if (t2Ref.current) { clearTimeout(t2Ref.current); t2Ref.current = null; }
+    if (t3Ref.current) { clearTimeout(t3Ref.current); t3Ref.current = null; }
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs, thinking]);
+    if (!el) return;
+    const id = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(id);
+  }, [msgs.length, thinking]);
 
-  // Cleanup pending timers on unmount
-  useEffect(() => () => {
-    if (t1Ref.current) clearTimeout(t1Ref.current);
-    if (t2Ref.current) clearTimeout(t2Ref.current);
+  useEffect(() => () => clearTimers(), [clearTimers]);
+
+  const announce = useCallback((text: string) => {
+    if (announcerRef.current) announcerRef.current.textContent = text;
   }, []);
 
-  function announce(text: string) {
-    if (announcerRef.current) announcerRef.current.textContent = text;
-  }
+  const send = useCallback((rawText: string) => {
+    const text = rawText.trim();
+    if (!text || busyRef.current) return;
+    busyRef.current = true;
 
-  function send(text: string) {
-    if (!text.trim() || thinkingRef.current) return;
-    thinkingRef.current = true;
+    try {
+      const userId = newId();
+      const userMsg: Msg = { id: userId, from: "user", text, ts: nowTs(), status: "sending" };
+      dispatch({ type: "SEND_START", userMsg });
 
-    const msgId = uid();
-    const userMsg: Msg = { id: msgId, from: "user", text, ts: nowTs(), status: "sending" };
+      t1Ref.current = setTimeout(() => {
+        t1Ref.current = null;
+        dispatch({ type: "MARK_SENT", id: userId });
+      }, 300);
 
-    setMsgs((m) => [...m.map((msg) => ({ ...msg, isLast: false })), userMsg]);
-    setInput("");
-    setThinking(true);
+      const stateAtSend = convState;
+      t2Ref.current = setTimeout(() => {
+        t2Ref.current = null;
+        try {
+          const { next, reply } = nextState(stateAtSend, text);
+          const replyMsg: Msg = {
+            id: newId(),
+            from: "bot",
+            ts: nowTs(),
+            text: reply.text,
+            quick: reply.quick,
+            isLast: true,
+          };
+          dispatch({ type: "REPLY", userId, reply: replyMsg, next });
+          announce(`Savia bot: ${reply.text.replace(/\n/g, " ").substring(0, 80)}`);
+          t3Ref.current = setTimeout(() => {
+            t3Ref.current = null;
+            inputRef.current?.focus();
+          }, 50);
+        } catch (err) {
+          console.error("[bot] reply error:", err);
+          dispatch({
+            type: "REPLY",
+            userId,
+            next: "menu",
+            reply: {
+              id: newId(),
+              from: "bot",
+              ts: nowTs(),
+              text: "Ups, algo falló. Volvamos al menú principal.",
+              quick: ["Confirmar recepción", "Registrar familia", "Ver historial"],
+              isLast: true,
+            },
+          });
+        } finally {
+          busyRef.current = false;
+        }
+      }, 900);
+    } catch (err) {
+      console.error("[bot] send error:", err);
+      busyRef.current = false;
+    }
+  }, [convState, newId, announce]);
 
-    t1Ref.current = setTimeout(() => {
-      setMsgs((m) => m.map((msg) => msg.id === msgId ? { ...msg, status: "sent" as Status } : msg));
-    }, 300);
+  const reset = useCallback(() => {
+    clearTimers();
+    busyRef.current = false;
+    dispatch({ type: "RESET", initial: buildInitial() });
+  }, [clearTimers, buildInitial]);
 
-    // Capture convState synchronously before the timeout fires
-    const stateAtSend = convState;
-    t2Ref.current = setTimeout(() => {
-      const { next, reply } = nextState(stateAtSend, text);
-      const replyWithLast: Msg = { ...reply, isLast: true };
+  const startFlow = useCallback((cmd: string) => {
+    clearTimers();
+    busyRef.current = false;
+    dispatch({ type: "RESET", initial: buildInitial() });
+    queueMicrotask(() => send(cmd));
+  }, [clearTimers, buildInitial, send]);
 
-      setConvState(next);
-      thinkingRef.current = false;
-      setThinking(false);
-      setMsgs((m) => [...m.map((msg) => msg.id === msgId ? { ...msg, status: "read" as Status } : msg), replyWithLast]);
-      announce(`Savia bot: ${reply.text.replace(/\n/g, " ").substring(0, 80)}`);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }, 900);
-  }
+  const onChangeInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    dispatch({ type: "INPUT", value: e.target.value });
+  }, []);
 
-  function reset() {
-    if (t1Ref.current) clearTimeout(t1Ref.current);
-    if (t2Ref.current) clearTimeout(t2Ref.current);
-    thinkingRef.current = false;
-    setMsgs(initialMsgs.map((m) => ({ ...m, isLast: true })));
-    setConvState("menu");
-    setInput("");
-    setThinking(false);
-  }
+  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!thinking) send(input);
+    }
+  }, [thinking, send, input]);
 
   const canSend = input.trim().length > 0 && !thinking;
+
+  const onSendClick = useCallback(() => {
+    if (!thinking && input.trim().length > 0) send(input);
+  }, [thinking, input, send]);
+
+  const headerTs = useMemo(() => nowTs(), []);
 
   return (
     <div className="min-h-screen bg-blanco">
@@ -364,7 +485,7 @@ function BotPage() {
 
             {/* Status bar */}
             <div className="bg-[#075E54] px-5 pt-2.5 pb-0 flex items-center justify-between">
-              <span className="text-white text-[11px] font-semibold tabular-nums" aria-hidden="true">{nowTs()}</span>
+              <span className="text-white text-[11px] font-semibold tabular-nums" aria-hidden="true">{headerTs}</span>
               <div className="flex items-center gap-1.5" aria-hidden="true">
                 <svg width="15" height="11" viewBox="0 0 15 11" fill="white" opacity="0.9"><rect x="0" y="7" width="2.5" height="4" rx="0.5"/><rect x="4" y="5" width="2.5" height="6" rx="0.5"/><rect x="8" y="2.5" width="2.5" height="8.5" rx="0.5"/><rect x="12" y="0" width="2.5" height="11" rx="0.5"/></svg>
                 <svg width="15" height="11" viewBox="0 0 24 18" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" opacity="0.9"><path d="M1 6C5.3 1.8 10.4 0 12 0s6.7 1.8 11 6"/><path d="M4 10c2.2-2.5 4.9-4 8-4s5.8 1.5 8 4"/><path d="M7.5 14c1.2-1.5 2.8-2 4.5-2s3.3.5 4.5 2"/><circle cx="12" cy="18" r="1.5" fill="white" stroke="none"/></svg>
@@ -374,7 +495,7 @@ function BotPage() {
 
             {/* WA Header */}
             <div className="bg-[#075E54] px-3 py-2.5 flex items-center gap-3">
-              <button className="text-white/80 hover:text-white p-1 -ml-1 rounded-full hover:bg-white/10 transition-colors" aria-label="Volver" tabIndex={-1}>
+              <button type="button" className="text-white/80 hover:text-white p-1 -ml-1 rounded-full hover:bg-white/10 transition-colors" aria-label="Volver" tabIndex={-1}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
               </button>
               <div className="relative">
@@ -391,10 +512,10 @@ function BotPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1" aria-hidden="true">
-                <button className="text-white/80 p-2 rounded-full" tabIndex={-1} aria-label="Videollamada (no disponible en demo)">
+                <button type="button" className="text-white/80 p-2 rounded-full" tabIndex={-1} aria-label="Videollamada (no disponible en demo)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
                 </button>
-                <button className="text-white/80 p-2 rounded-full" tabIndex={-1} aria-label="Llamada (no disponible en demo)">
+                <button type="button" className="text-white/80 p-2 rounded-full" tabIndex={-1} aria-label="Llamada (no disponible en demo)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.13 11.7 19.79 19.79 0 0 1 1.06 3 2 2 0 0 1 3.04.99h3a2 2 0 0 1 2 1.72c.128 1.006.362 1.996.7 2.95a2 2 0 0 1-.45 2.11L7.09 9a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.954.338 1.944.572 2.95.7A2 2 0 0 1 22 16.92Z"/></svg>
                 </button>
               </div>
@@ -417,7 +538,7 @@ function BotPage() {
               </div>
 
               {msgs.map((m) => (
-                <Bubble key={m.id} m={m} onQuick={send} thinking={thinking} />
+                <Bubble key={m.id} m={m} onQuick={send} disabled={thinking} />
               ))}
 
               {thinking && (
@@ -434,23 +555,24 @@ function BotPage() {
 
             {/* Input */}
             <div className="bg-[#F0F2F5] px-2 py-2 flex items-end gap-2">
-              <button className="h-10 w-10 rounded-full text-[#54656F] flex items-center justify-center shrink-0" aria-label="Adjuntar (no disponible en demo)" tabIndex={-1}>
+              <button type="button" className="h-10 w-10 rounded-full text-[#54656F] flex items-center justify-center shrink-0" aria-label="Adjuntar (no disponible en demo)" tabIndex={-1}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
               </button>
               <input
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && canSend && send(input.trim())}
-                placeholder="Escribe un mensaje"
-                disabled={thinking}
-                className="flex-1 rounded-3xl bg-white px-4 py-2.5 text-[14px] text-tinta outline-none placeholder:text-[#54656F]/70 disabled:opacity-60 transition-opacity"
+                onChange={onChangeInput}
+                onKeyDown={onKeyDown}
+                placeholder={thinking ? "Savia está escribiendo…" : "Escribe un mensaje"}
+                readOnly={thinking}
+                className={`flex-1 rounded-3xl bg-white px-4 py-2.5 text-[14px] text-tinta outline-none placeholder:text-[#54656F]/70 transition-opacity ${thinking ? "opacity-60" : ""}`}
                 aria-label="Escribe un mensaje"
-                aria-disabled={thinking}
+                aria-busy={thinking}
                 autoComplete="off"
               />
               <button
-                onClick={() => canSend ? send(input.trim()) : undefined}
+                type="button"
+                onClick={onSendClick}
                 disabled={!canSend}
                 className="h-10 w-10 rounded-full bg-[#00A884] flex items-center justify-center shrink-0 text-white transition-all disabled:opacity-80"
                 aria-label={canSend ? "Enviar mensaje" : "Nota de voz (no disponible en demo)"}
@@ -468,6 +590,7 @@ function BotPage() {
           <div className="flex items-center justify-between mt-3 px-1">
             <p className="text-[12px] text-tinta/40">Demo interactivo · escribe o usa los botones</p>
             <button
+              type="button"
               onClick={reset}
               className="text-[12px] text-savia/70 hover:text-savia transition-colors flex items-center gap-1"
               aria-label="Reiniciar conversación"
@@ -514,8 +637,9 @@ function BotPage() {
               { label: "Registrar peso y talla de un niño", cmd: "Registrar peso/talla" },
             ].map(({ label, cmd }) => (
               <button
+                type="button"
                 key={cmd}
-                onClick={() => { reset(); setTimeout(() => send(cmd), 50); }}
+                onClick={() => startFlow(cmd)}
                 disabled={thinking}
                 className="w-full text-left rounded-xl border border-crema-dark bg-crema/60 hover:bg-crema px-4 py-3 text-[13px] text-tinta/80 hover:text-tinta transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label={`Iniciar flujo: ${label}`}
@@ -536,9 +660,9 @@ function BotPage() {
   );
 }
 
-// ─── Bubble ───────────────────────────────────────────────────────────────────
+// ─── Bubble (memoized) ────────────────────────────────────────────────────────
 
-function Bubble({ m, onQuick, thinking }: { m: Msg; onQuick: (t: string) => void; thinking: boolean }) {
+const Bubble = memo(function Bubble({ m, onQuick, disabled }: { m: Msg; onQuick: (t: string) => void; disabled: boolean }) {
   const isBot = m.from === "bot";
   const showQuick = isBot && m.isLast && m.quick && m.quick.length > 0;
   return (
@@ -558,9 +682,10 @@ function Bubble({ m, onQuick, thinking }: { m: Msg; onQuick: (t: string) => void
           <div className="mt-2.5 flex flex-wrap gap-1.5" role="group" aria-label="Respuestas rápidas">
             {m.quick!.map((q) => (
               <button
+                type="button"
                 key={q}
                 onClick={() => onQuick(q)}
-                disabled={thinking}
+                disabled={disabled}
                 className="rounded-full border border-[#00A884]/40 text-[#00A884] bg-[#00A884]/5 hover:bg-[#00A884]/15 px-3 py-1 text-[12px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label={`Responder: ${q}`}
               >
@@ -577,7 +702,7 @@ function Bubble({ m, onQuick, thinking }: { m: Msg; onQuick: (t: string) => void
       </div>
     </article>
   );
-}
+});
 
 function StatusTicks({ status }: { status: Status }) {
   if (status === "sending") return (
