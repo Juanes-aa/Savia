@@ -278,50 +278,60 @@ function BotPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const announcerRef = useRef<HTMLDivElement>(null);
+  // Synchronous guard to prevent race conditions with React's async state
+  const thinkingRef = useRef(false);
+  const t1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const t2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs, thinking]);
 
+  // Cleanup pending timers on unmount
+  useEffect(() => () => {
+    if (t1Ref.current) clearTimeout(t1Ref.current);
+    if (t2Ref.current) clearTimeout(t2Ref.current);
+  }, []);
+
   function announce(text: string) {
     if (announcerRef.current) announcerRef.current.textContent = text;
   }
 
   function send(text: string) {
-    if (!text.trim() || thinking) return;
+    if (!text.trim() || thinkingRef.current) return;
+    thinkingRef.current = true;
 
     const msgId = uid();
     const userMsg: Msg = { id: msgId, from: "user", text, ts: nowTs(), status: "sending" };
 
-    // Mark previous bot message as "no longer last" to hide its quick replies
-    setMsgs((m) => [
-      ...m.map((msg) => ({ ...msg, isLast: false })),
-      userMsg,
-    ]);
+    setMsgs((m) => [...m.map((msg) => ({ ...msg, isLast: false })), userMsg]);
     setInput("");
     setThinking(true);
 
-    setTimeout(() => {
-      setMsgs((m) => m.map((msg) => msg.id === msgId ? { ...msg, status: "sent" } : msg));
+    t1Ref.current = setTimeout(() => {
+      setMsgs((m) => m.map((msg) => msg.id === msgId ? { ...msg, status: "sent" as Status } : msg));
     }, 300);
 
-    setTimeout(() => {
-      const { next, reply } = nextState(convState, text);
+    // Capture convState synchronously before the timeout fires
+    const stateAtSend = convState;
+    t2Ref.current = setTimeout(() => {
+      const { next, reply } = nextState(stateAtSend, text);
       const replyWithLast: Msg = { ...reply, isLast: true };
 
       setConvState(next);
+      thinkingRef.current = false;
       setThinking(false);
-      setMsgs((m) => [
-        ...m.map((msg) => msg.id === msgId ? { ...msg, status: "read" } : msg),
-        replyWithLast,
-      ]);
+      setMsgs((m) => [...m.map((msg) => msg.id === msgId ? { ...msg, status: "read" as Status } : msg), replyWithLast]);
       announce(`Savia bot: ${reply.text.replace(/\n/g, " ").substring(0, 80)}`);
       setTimeout(() => inputRef.current?.focus(), 50);
     }, 900);
   }
 
   function reset() {
+    if (t1Ref.current) clearTimeout(t1Ref.current);
+    if (t2Ref.current) clearTimeout(t2Ref.current);
+    thinkingRef.current = false;
     setMsgs(initialMsgs.map((m) => ({ ...m, isLast: true })));
     setConvState("menu");
     setInput("");
